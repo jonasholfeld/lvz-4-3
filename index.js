@@ -7,6 +7,8 @@ const { json } = require("body-parser");
 const { JSDOM } = jsdom;
 var bodyParser = require('body-parser')
 let content;
+const cache = {};
+const maxCacheSize = 1000;
 app.set('view engine', 'ejs');
 app.use(
     express.urlencoded({
@@ -28,9 +30,18 @@ app.get("/", (req, res) => {
 });
 app.post('/', (req, res) => {
     let url = req.body.inputUrl;
+    let baseUrl = url.split('/')[2]
+    if(baseUrl != 'lvz.de' && baseUrl != 'www.lvz.de') {
+        res.render("article", { headline: 'Das ist kein LVZ Artikel.',  description: "", articleBody: "" })
+        return
+    }
+    if(url in cache) {
+        content = cache[url]
+        res.render("article", { headline: content.headline, description: content.description, articleBody: content.articleBody });
+        return
+    }
     let html = getArticleData(url);
     html.then(response => {
-        console.log(typeof response );
         const dom = new jsdom.JSDOM(response);
         var scripts = dom.window.document.getElementsByTagName("script");
         for (var i = 0; i < scripts.length; ++i) {
@@ -38,10 +49,18 @@ app.post('/', (req, res) => {
                 let parsedJson = JSON.parse(scripts[i].innerHTML)
                 if(parsedJson.articleBody != "") {
                     content = parsedJson;
+                    content.time = Date.now()
+                    cache[url] = content
                 }
             }
         }
-        res.render("article", { headline: content.headline, alternativeHeadline: content.alternativeHeadline, description: content.description, articleBody: content.articleBody });
+        if(Object.keys(cache).length > maxCacheSize) {
+            let oldest = Object.keys(cache).reduce((key, v) => cache[v] < cache[key] ? v : key);
+            delete cache[oldest]
+            console.log("deleted oldest")
+            console.log(cache)
+        }
+        res.render("article", { headline: content.headline, description: content.description, articleBody: content.articleBody });
     })
 });
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
